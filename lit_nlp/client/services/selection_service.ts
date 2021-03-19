@@ -28,6 +28,7 @@ import {SelectionObservedByUrlService} from './url_service';
  */
 export interface AppState {
   currentInputData: IndexedInput[];
+  compareExamplesEnabled: boolean;
   getCurrentInputDataById: (id: string) => IndexedInput | null;
   getExamplesById: (ids: string[]) => IndexedInput[];
 }
@@ -117,6 +118,21 @@ export class SelectionService extends LitService implements
       this.primarySelectedIdInternal = ids[0];
     }
     this.setLastUser(user);
+  }
+
+  @action
+  selectAndCompare(refId: string, compareId: string) {
+    // Disable compare mode to change reference example.
+    if (this.appState.compareExamplesEnabled) {
+      this.appState.compareExamplesEnabled = false;
+    }
+    this.setPrimarySelection(refId);
+    this.appState.compareExamplesEnabled = true;
+    // We need this because compareExamplesEnabled reaction does not trigger
+    // before this call ends.
+    requestAnimationFrame(() => {
+      this.setPrimarySelection(compareId);
+    });
   }
 
   /**
