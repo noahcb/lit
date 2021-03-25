@@ -85,18 +85,35 @@ class GlueModel(lit_model.Model):
         config=model_config)
 
   def _preprocess(self, inputs: Iterable[JsonDict]) -> Dict[str, tf.Tensor]:
+    # If pre-tokenized input is provided then use that, otherwise use the
+    # raw text.
+    is_split_into_words = False
+    def get_tokens_or_text(ex, text_name):
+      nonlocal is_split_into_words
+      token_name = "tokens_" + text_name
+      if token_name in ex:
+        is_split_into_words = True
+        return ex[token_name]
+      else:
+        return ex[text_name]
+
     if self.config.text_b_name:
-      segments = [(ex[self.config.text_a_name], ex[self.config.text_b_name])
+      segments = [(get_tokens_or_text(ex, self.config.text_a_name),
+                   get_tokens_or_text(ex, self.config.text_b_name))
                   for ex in inputs]
     else:
-      segments = [ex[self.config.text_a_name] for ex in inputs]
+      segments = [get_tokens_or_text(ex, self.config.text_a_name)
+                  for ex in inputs]
+
+    # Encode as token ids.
     encoded_input = self.tokenizer.batch_encode_plus(
         segments,
         return_tensors="tf",
         add_special_tokens=True,
         max_length=self.config.max_seq_length,
         padding="longest",
-        truncation="longest_first")
+        truncation="longest_first",
+        is_split_into_words=is_split_into_words)
     return encoded_input
 
   def _make_dataset(self, inputs: Iterable[JsonDict]) -> tf.data.Dataset:
@@ -326,6 +343,10 @@ class GlueModel(lit_model.Model):
   def max_minibatch_size(self):
     return self.config.inference_batch_size
 
+  def get_embedding_table(self):
+    vocab = list(self.tokenizer.vocab.keys())
+    return vocab, self.model.bert.embeddings.word_embeddings.numpy()
+
   def predict_minibatch(self, inputs: Iterable[JsonDict]):
     # Use watch_accessed_variables to save memory by having the tape do nothing
     # if we don't need gradients.
@@ -405,8 +426,12 @@ class GlueModel(lit_model.Model):
   def input_spec(self) -> Spec:
     ret = {}
     ret[self.config.text_a_name] = lit_types.TextSegment()
+    ret["tokens_" + self.config.text_a_name] = lit_types.Tokens(
+        parent=self.config.text_a_name, required=False)
     if self.config.text_b_name:
       ret[self.config.text_b_name] = lit_types.TextSegment()
+      ret["tokens_" + self.config.text_b_name] = lit_types.Tokens(
+          parent=self.config.text_b_name, required=False)
     if self.is_regression:
       ret[self.config.label_name] = lit_types.RegressionScore(required=False)
     else:
